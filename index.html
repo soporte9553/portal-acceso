@@ -118,54 +118,43 @@
     });
   }
 
- // 2. Sonda de Túneles mejorada: detecta códigos de error HTTP (como 530/1033 o 502)
-  function probeTunnel(base, timeoutMs) {
-    return new Promise(resolve => {
-      const controller = new AbortController();
-      let isDone = false;
-  
-      const timer = setTimeout(() => {
-        if (!isDone) {
-          isDone = true;
-          controller.abort();
-          resolve(false);
-        }
-      }, timeoutMs);
-  
-      // Verificamos favicon o TARGET_PATH con fetch estándar para evaluar res.ok
-      fetch(`${base}${TARGET_PATH}`, {
-        method: "GET",
-        cache: "no-store",
-        signal: controller.signal
-      })
-      .then(res => {
-        if (!isDone) {
-          isDone = true;
-          clearTimeout(timer);
-          // Si Cloudflare da Error 1033 (código 530) o 502, res.ok será false y no entrará aquí
-          if (res.ok || (res.status >= 200 && res.status < 400)) {
-            resolve(true);
-          } else {
-            resolve(false);
-          }
-        }
-      })
-      .catch(() => {
-        // Si el navegador bloquea CORS por ser dominios distintos, usamos el detector por imagen estricto
-        if (!isDone) {
-          const testImg = new Image();
-          testImg.onload = () => {
-            if (!isDone) { isDone = true; clearTimeout(timer); resolve(true); }
-          };
-          testImg.onerror = () => {
-            // El Error 1033 devuelve HTML, por lo que una imagen fallará (false)
-            if (!isDone) { isDone = true; clearTimeout(timer); resolve(false); }
-          };
-          testImg.src = `${base}/favicon.ico?_t=${Date.now()}`;
-        }
-      });
+ // Validación estricta: consulta el endpoint interno de Cloudflare y detecta si el túnel está muerto
+function probeTunnel(base, timeoutMs) {
+  return new Promise(resolve => {
+    const controller = new AbortController();
+    let isDone = false;
+
+    const timer = setTimeout(() => {
+      if (!isDone) {
+        isDone = true;
+        controller.abort();
+        resolve(false);
+      }
+    }, timeoutMs);
+
+    // /cdn-cgi/trace devuelve 200 solo si el túnel está activo
+    fetch(`${base}/cdn-cgi/trace?_t=${Date.now()}`, {
+      method: "GET",
+      cache: "no-store",
+      signal: controller.signal
+    })
+    .then(res => {
+      if (!isDone) {
+        isDone = true;
+        clearTimeout(timer);
+        // Si Cloudflare da Error 1033 (código 530) o 502, res.ok será false
+        resolve(res.ok && res.status === 200);
+      }
+    })
+    .catch(() => {
+      if (!isDone) {
+        isDone = true;
+        clearTimeout(timer);
+        resolve(false);
+      }
     });
-  }
+  });
+}
 
   function redirect(base, label) {
     if (isCancelled) return;
