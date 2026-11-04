@@ -99,23 +99,7 @@
     });
   }
 
-  function redirect(baseHost, label) {
-    if (isCancelled) return;
-
-    const finalUrl = `${baseHost.replace(/\/+$/, "")}${TARGET_PATH}`;
-    statusEl.textContent = `Conectando por ${label}...`;
-    manualBtn.href = finalUrl;
-    manualBtn.style.display = "inline-block";
-    spinner.style.display = "none";
-
-    setTimeout(() => {
-      if (!isCancelled) {
-        window.location.replace(finalUrl);
-      }
-    }, 400);
-  }
-
- async function resolveRoute() {
+  async function resolveRoute() {
   if (isAdminMode) {
     isCancelled = true;
     spinner.style.display = "none";
@@ -125,43 +109,51 @@
     return;
   }
 
-  // 1. Obtener la URL más reciente de Cloudflare desde el config.json
+  // 1. Variable para almacenar el host de Cloudflare que usaremos
+  let activeCfHost = getCloudflareHost();
+
+  // 2. Descargar config.json forzando que no use caché
   try {
-    const res = await fetch(`config.json?_t=${Date.now()}`);
+    statusEl.textContent = "Obteniendo configuración actualizada...";
+    const res = await fetch(`config.json?_t=${Date.now()}`, { cache: "no-store" });
     if (res.ok) {
       const data = await res.json();
       if (data.cloudflare_host) {
-        localStorage.setItem("custom_cf_host", data.cloudflare_host);
+        activeCfHost = data.cloudflare_host.replace(/\/+$/, "");
+        localStorage.setItem("custom_cf_host", activeCfHost);
+        cfInput.value = activeCfHost;
       }
     }
   } catch (e) {
-    console.warn("No se pudo obtener config.json, usando valor local/fallback");
+    console.warn("No se pudo leer config.json, usando último valor conocido:", e);
   }
 
-  // 2. Probar red Local
+  // 3. Probar Red Local (timeout 1.2s)
   try {
     statusEl.textContent = "Buscando servidor local...";
     await probeEndpoint(LOCAL_HOST, 1200);
     redirect(LOCAL_HOST, "Red Local (Oficina)");
     return;
   } catch (e) {
-    console.log("Local inaccesible, pasando a túnel externo...");
+    console.log("Local inaccesible, pasando a Cloudflare...");
   }
 
-  // 3. Probar Cloudflare Tunnel actualizado
-  const cfHost = getCloudflareHost();
+  // 4. Probar la URL de Cloudflare recién leída del JSON
   try {
     statusEl.textContent = "Conectando vía Cloudflare...";
-    await probeEndpoint(cfHost, 2200);
-    redirect(cfHost, "Cloudflare Tunnel");
+    await probeEndpoint(activeCfHost, 2200);
+    redirect(activeCfHost, "Cloudflare Tunnel");
     return;
   } catch (e) {
     console.log("Cloudflare no respondió, recurriendo a Ngrok...");
   }
 
-  // 4. Fallback a Ngrok
+  // 5. Fallback a Ngrok
   redirect(NGROK_HOST, "Ngrok (Respaldo)");
 }
+
+  // 4. Fallback a Ngrok
+ 
   function toggleConfig() {
     isCancelled = true;
     spinner.style.display = "none";
