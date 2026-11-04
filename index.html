@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -30,7 +31,7 @@
   <span class="badge-admin" id="admin-badge">MODO CONFIGURACIÓN ACTIVO</span>
   <div class="loader" id="spinner"></div>
   <h2>Portal de Acceso</h2>
-  <div class="status-text" id="status">Detectando vía de conexión...</div>
+  <div class="status-text" id="status">Iniciando...</div>
 
   <a href="#" id="manual-btn" class="btn-manual">Entrar directamente</a>
   <button id="retry-btn" class="btn-manual" onclick="location.reload()">Reintentar</button>
@@ -44,16 +45,13 @@
 </div>
 
 <script>
-  // ---- Configuración Base --------------------------------------------------
   const DEFAULTS = {
     local: "http://192.168.111.2",
     cloudflare: "https://precise-bradley-eco-bulletin.trycloudflare.com",
     ngrok: "https://indirectly-kind-crappie.ngrok-free.app"
   };
   const TARGET_PATH = "/menu/";
-  const PROBE_PATH = "/favicon.ico";
 
-  // ---- Elementos del DOM ---------------------------------------------------
   const statusEl = document.getElementById("status");
   const manualBtn = document.getElementById("manual-btn");
   const retryBtn = document.getElementById("retry-btn");
@@ -67,7 +65,6 @@
   const urlParams = new URLSearchParams(window.location.search);
   const isAdminMode = urlParams.get("admin") === "true" || window.location.hash === "#admin";
 
-  // ---- Utilidades ----------------------------------------------------------
   function cleanHost(h) {
     h = (h || "").trim().replace(/\/+$/, "");
     if (h && !/^https?:\/\//i.test(h)) h = "https://" + h;
@@ -83,39 +80,69 @@
 
   cfInput.value = getCloudflareHost();
 
-  // Sonda universal: usa Image para eludir Mixed Content en local, y fetch no-cors para túneles
-function probeEndpoint(base, timeoutMs, isLocal = false) {
-  return new Promise(resolve => {
-    let finished = false;
-    const finish = ok => {
-      if (!finished) {
-        finished = true;
-        clearTimeout(timer);
-        resolve(ok);
-      }
-    };
-
-    const timer = setTimeout(() => finish(false), timeoutMs);
-
-    if (isLocal) {
-      // Método Imagen para IP Local (evita bloqueo HTTPS -> HTTP)
+  // 1. Sonda Local Robusta: solo acepta si responde antes de timeoutMs y no dispara rebotes en móvil
+  function probeLocal(base, timeoutMs) {
+    return new Promise(resolve => {
+      let isDone = false;
       const img = new Image();
-      img.onload = () => finish(true);
-      img.onerror = () => finish(true); // Si responde en red local (incluso 404), el host existe
-      img.src = `${base}${PROBE_PATH}?_t=${Date.now()}`;
-    } else {
-      // Método Fetch con no-cors para Cloudflare y Ngrok (ignora tipo de archivo y cabeceras)
-      fetch(`${base}${TARGET_PATH}`, { 
-        method: "HEAD", 
-        mode: "no-cors", 
+
+      const timer = setTimeout(() => {
+        if (!isDone) {
+          isDone = true;
+          // Desactivar callbacks ANTES de vaciar el src para evitar que el navegador dispare onerror
+          img.onload = null;
+          img.onerror = null;
+          img.src = "";
+          resolve(false);
+        }
+      }, timeoutMs);
+
+      img.onload = () => {
+        if (!isDone) {
+          isDone = true;
+          clearTimeout(timer);
+          resolve(true);
+        }
+      };
+
+      // Si responde inmediatamente (incluso con error de formato), hubo conectividad local
+      img.onerror = () => {
+        if (!isDone) {
+          isDone = true;
+          clearTimeout(timer);
+          resolve(true);
+        }
+      };
+
+      img.src = `${base}/favicon.ico?_t=${Date.now()}`;
+    });
+  }
+
+  // 2. Sonda Túneles (Cloudflare / Ngrok): fetch rápido con no-cors y timeout estricto
+  function probeTunnel(base, timeoutMs) {
+    return new Promise(resolve => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => {
+        controller.abort();
+        resolve(false);
+      }, timeoutMs);
+
+      fetch(`${base}${TARGET_PATH}`, {
+        method: "HEAD",
+        mode: "no-cors",
         cache: "no-store",
-        headers: { "ngrok-skip-browser-warning": "true" } // Salta la pantalla de Ngrok
+        signal: controller.signal
       })
-      .then(() => finish(true))
-      .catch(() => finish(false));
-    }
-  });
-}
+      .then(() => {
+        clearTimeout(timer);
+        resolve(true);
+      })
+      .catch(() => {
+        clearTimeout(timer);
+        resolve(false);
+      });
+    });
+  }
 
   function redirect(base, label) {
     if (isCancelled) return;
@@ -129,19 +156,16 @@ function probeEndpoint(base, timeoutMs, isLocal = false) {
       if (!isCancelled) {
         window.location.replace(url);
       }
-    }, 350);
+    }, 250);
   }
 
   function showFailure() {
     spinner.style.display = "none";
     statusEl.classList.add("error");
-    statusEl.textContent = navigator.onLine === false
-      ? "Sin conexión a internet ni a la red local. Revisa tu Wi-Fi o cable de red."
-      : "No se pudo conectar: el servidor local y los túneles externos parecen apagados.";
+    statusEl.textContent = "No se pudo conectar con el servidor local ni con los túneles externos.";
     retryBtn.style.display = "inline-block";
   }
 
-  // ---- Resolución en Cascada Secuencial ------------------------------------
   async function resolveRoute() {
     if (isAdminMode) {
       isCancelled = true;
@@ -158,9 +182,9 @@ function probeEndpoint(base, timeoutMs, isLocal = false) {
       ngrok: DEFAULTS.ngrok
     };
 
-    // 1. Descargar config.json sin caché para tener siempre el Cloudflare del .bat
+    // 1. Descargar config.json sin caché
     try {
-      statusEl.textContent = "Obteniendo configuración actualizada...";
+      statusEl.textContent = "Cargando configuración...";
       const res = await fetch(`config.json?_t=${Date.now()}`, { cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
@@ -173,32 +197,32 @@ function probeEndpoint(base, timeoutMs, isLocal = false) {
         }
       }
     } catch (e) {
-      console.warn("No se pudo leer config.json, usando último valor conocido:", e);
+      console.warn("No se pudo leer config.json, usando último valor conocido");
     }
 
     if (isCancelled) return;
 
-    // 2. Probar RED LOCAL primero (timeout ágil de 1.2s)
-    statusEl.textContent = "Buscando servidor local...";
-    const localOk = await probeImage(hosts.local, 1200, true);
+    // 2. Probar RED LOCAL (timeout rápido de 800ms)
+    statusEl.textContent = "Comprobando red local...";
+    const localOk = await probeLocal(hosts.local, 800);
     if (isCancelled) return;
     if (localOk) {
       redirect(hosts.local, "Red Local (Oficina)");
       return;
     }
 
-    // 3. Probar CLOUDFLARE como prioridad externa (timeout 2.5s)
+    // 3. Probar CLOUDFLARE TUNNEL (timeout de 2500ms)
     statusEl.textContent = "Conectando vía Cloudflare...";
-    const cfOk = await probeImage(hosts.cloudflare, 2500, false);
+    const cfOk = await probeTunnel(hosts.cloudflare, 2500);
     if (isCancelled) return;
     if (cfOk) {
       redirect(hosts.cloudflare, "Cloudflare Tunnel");
       return;
     }
 
-    // 4. Probar NGROK solo como último respaldo (timeout 3.0s)
-    statusEl.textContent = "Conectando vía Ngrok (Respaldo)...";
-    const ngrokOk = await probeImage(hosts.ngrok, 3000, false);
+    // 4. Probar NGROK como respaldo (timeout de 2500ms)
+    statusEl.textContent = "Conectando vía Ngrok...";
+    const ngrokOk = await probeTunnel(hosts.ngrok, 2500);
     if (isCancelled) return;
     if (ngrokOk) {
       redirect(hosts.ngrok, "Ngrok (Respaldo)");
