@@ -147,20 +147,36 @@
     });
   }
 
-  function redirect(base, label) {
-    if (isCancelled) return;
-    const url = base.replace(/\/+$/, "") + TARGET_PATH;
-    statusEl.textContent = `Conectando por ${label}...`;
-    manualBtn.href = url;
-    manualBtn.style.display = "inline-block";
-    spinner.style.display = "none";
+ function redirect(base, label) {
+  if (isCancelled) return;
+  const url = base.replace(/\/+$/, "") + TARGET_PATH;
+  statusEl.textContent = `Conectando por ${label}...`;
+  manualBtn.href = url;
+  manualBtn.style.display = "inline-block";
+  spinner.style.display = "none";
 
-    setTimeout(() => {
-      if (!isCancelled) {
-        window.location.replace(url);
-      }
-    }, 250);
+  // Si la ruta elegida es Ngrok, forzamos la cookie antes de abrir la página
+  if (base.includes("ngrok")) {
+    // Petición con la cabecera que indica a Ngrok que el usuario ya validó la advertencia
+    fetch(url, {
+      method: "GET",
+      mode: "no-cors",
+      headers: { "ngrok-skip-browser-warning": "true" }
+    }).finally(() => {
+      setTimeout(() => {
+        if (!isCancelled) window.location.replace(url);
+      }, 300);
+    });
+    return;
   }
+
+  // Redirección normal para Red Local y Cloudflare
+  setTimeout(() => {
+    if (!isCancelled) {
+      window.location.replace(url);
+    }
+  }, 250);
+}
 
   function showFailure() {
     spinner.style.display = "none";
