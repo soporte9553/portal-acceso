@@ -51,6 +51,7 @@
     ngrok: "https://indirectly-kind-crappie.ngrok-free.app"
   };
   const TARGET_PATH = "/menu/";
+  const PROBE_PATH = "/Tickets_REVESOL/logo-empresa.png";
 
   const statusEl = document.getElementById("status");
   const manualBtn = document.getElementById("manual-btn");
@@ -80,85 +81,75 @@
 
   cfInput.value = getCloudflareHost();
 
-  // 1. Sonda Local Robusta: solo acepta si responde antes de timeoutMs y no dispara rebotes en móvil
-  function probeLocal(base, timeoutMs) {
+  // Método 1: Prueba de imagen (para Local y Cloudflare)
+  function probeByImage(base, timeoutMs) {
     return new Promise(resolve => {
       let isDone = false;
       const img = new Image();
 
-      const timer = setTimeout(() => {
+      const finish = ok => {
         if (!isDone) {
           isDone = true;
-          // Desactivar callbacks ANTES de vaciar el src para evitar que el navegador dispare onerror
+          clearTimeout(timer);
           img.onload = null;
           img.onerror = null;
           img.src = "";
+          resolve(ok);
+        }
+      };
+
+      const timer = setTimeout(() => finish(false), timeoutMs);
+
+      // Carga exitosa del logo PNG
+      img.onload = () => finish(true);
+      // Falla si el servidor no responde o si Cloudflare entrega HTML de error (Error 1033)
+      img.onerror = () => finish(false);
+
+      img.src = `${base.replace(/\/+$/, "")}${PROBE_PATH}?_t=${Date.now()}`;
+    });
+  }
+
+  // Método 2: Prueba especial para Ngrok saltando la pantalla de advertencia
+  function probeNgrok(base, timeoutMs) {
+    return new Promise(resolve => {
+      const controller = new AbortController();
+      let isDone = false;
+
+      const timer = setTimeout(() => {
+        if (!isDone) {
+          isDone = true;
+          controller.abort();
           resolve(false);
         }
       }, timeoutMs);
 
-      img.onload = () => {
+      fetch(`${base.replace(/\/+$/, "")}${TARGET_PATH}`, {
+        method: "GET",
+        mode: "no-cors",
+        cache: "no-store",
+        headers: { "ngrok-skip-browser-warning": "69420" },
+        signal: controller.signal
+      })
+      .then(() => {
         if (!isDone) {
           isDone = true;
           clearTimeout(timer);
           resolve(true);
         }
-      };
-
-      // Si responde inmediatamente (incluso con error de formato), hubo conectividad local
-      img.onerror = () => {
+      })
+      .catch(() => {
         if (!isDone) {
           isDone = true;
           clearTimeout(timer);
-          resolve(true);
+          resolve(false);
         }
-      };
-
-      img.src = `${base}/favicon.ico?_t=${Date.now()}`;
+      });
     });
   }
 
- // Validación estricta: consulta el endpoint interno de Cloudflare y detecta si el túnel está muerto
-function probeTunnel(base, timeoutMs) {
-  return new Promise(resolve => {
-    const controller = new AbortController();
-    let isDone = false;
-
-    const timer = setTimeout(() => {
-      if (!isDone) {
-        isDone = true;
-        controller.abort();
-        resolve(false);
-      }
-    }, timeoutMs);
-
-    // /cdn-cgi/trace devuelve 200 solo si el túnel está activo
-    fetch(`${base}/cdn-cgi/trace?_t=${Date.now()}`, {
-      method: "GET",
-      cache: "no-store",
-      signal: controller.signal
-    })
-    .then(res => {
-      if (!isDone) {
-        isDone = true;
-        clearTimeout(timer);
-        // Si Cloudflare da Error 1033 (código 530) o 502, res.ok será false
-        resolve(res.ok && res.status === 200);
-      }
-    })
-    .catch(() => {
-      if (!isDone) {
-        isDone = true;
-        clearTimeout(timer);
-        resolve(false);
-      }
-    });
-  });
-}
-
   function redirect(base, label) {
     if (isCancelled) return;
-    const url = base + TARGET_PATH;
+    const url = base.replace(/\/+$/, "") + TARGET_PATH;
     statusEl.textContent = `Conectando por ${label}...`;
     manualBtn.href = url;
     manualBtn.style.display = "inline-block";
@@ -174,7 +165,7 @@ function probeTunnel(base, timeoutMs) {
   function showFailure() {
     spinner.style.display = "none";
     statusEl.classList.add("error");
-    statusEl.textContent = "No se pudo conectar con el servidor local ni con los túneles externos.";
+    statusEl.textContent = "No se pudo conectar con la red local ni con los túneles externos.";
     retryBtn.style.display = "inline-block";
   }
 
@@ -194,7 +185,7 @@ function probeTunnel(base, timeoutMs) {
       ngrok: DEFAULTS.ngrok
     };
 
-    // 1. Descargar config.json sin caché
+    // 1. Obtener la última URL de config.json
     try {
       statusEl.textContent = "Cargando configuración...";
       const res = await fetch(`config.json?_t=${Date.now()}`, { cache: "no-store" });
@@ -214,34 +205,34 @@ function probeTunnel(base, timeoutMs) {
 
     if (isCancelled) return;
 
-    // 2. Probar RED LOCAL (timeout rápido de 800ms)
+    // 2. Probar RED LOCAL con el logo real (timeout 1.0s)
     statusEl.textContent = "Comprobando red local...";
-    const localOk = await probeLocal(hosts.local, 800);
+    const localOk = await probeByImage(hosts.local, 1000);
     if (isCancelled) return;
     if (localOk) {
       redirect(hosts.local, "Red Local (Oficina)");
       return;
     }
 
-    // 3. Probar CLOUDFLARE TUNNEL (timeout de 2500ms)
+    // 3. Probar CLOUDFLARE con el logo real (timeout 2.5s)
     statusEl.textContent = "Conectando vía Cloudflare...";
-    const cfOk = await probeTunnel(hosts.cloudflare, 2500);
+    const cfOk = await probeByImage(hosts.cloudflare, 2500);
     if (isCancelled) return;
     if (cfOk) {
       redirect(hosts.cloudflare, "Cloudflare Tunnel");
       return;
     }
 
-    // 4. Probar NGROK como respaldo (timeout de 2500ms)
+    // 4. Probar NGROK con fetch y cabecera anti-advertencia (timeout 2.5s)
     statusEl.textContent = "Conectando vía Ngrok...";
-    const ngrokOk = await probeTunnel(hosts.ngrok, 2500);
+    const ngrokOk = await probeNgrok(hosts.ngrok, 2500);
     if (isCancelled) return;
     if (ngrokOk) {
       redirect(hosts.ngrok, "Ngrok (Respaldo)");
       return;
     }
 
-    // 5. Si ninguno respondió
+    // 5. Fallo total si ninguno responde
     showFailure();
   }
 
