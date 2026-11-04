@@ -44,7 +44,7 @@
 <script>
   const LOCAL_HOST = "http://192.168.111.2";
   const NGROK_HOST = "https://indirectly-kind-crappie.ngrok-free.app";
-  const CF_DEFAULT = "https://tu-tunel-actual.trycloudflare.com";
+  const CF_DEFAULT = "https://nations-framework-mother-dicke.trycloudflare.com";
   const TARGET_PATH = "/menu/";
 
   const statusEl = document.getElementById("status");
@@ -115,41 +115,53 @@
     }, 400);
   }
 
-  async function resolveRoute() {
-    if (isAdminMode) {
-      isCancelled = true;
-      spinner.style.display = "none";
-      adminBadge.style.display = "inline-block";
-      statusEl.textContent = "Redirección pausada para configuración.";
-      configBox.style.display = "block";
-      return;
-    }
-
-    // 1. Probar red Local (timeout de 1.2s)
-    try {
-      statusEl.textContent = "Buscando servidor local...";
-      await probeEndpoint(LOCAL_HOST, 1200);
-      redirect(LOCAL_HOST, "Red Local (Oficina)");
-      return;
-    } catch (e) {
-      console.log("Local inaccesible, pasando a túnel externo...");
-    }
-
-    // 2. Probar Cloudflare Tunnel como opción remota PRINCIPAL (timeout de 2.2s)
-    const cfHost = getCloudflareHost();
-    try {
-      statusEl.textContent = "Conectando vía Cloudflare...";
-      await probeEndpoint(cfHost, 2200);
-      redirect(cfHost, "Cloudflare Tunnel");
-      return;
-    } catch (e) {
-      console.log("Cloudflare no respondió, recurriendo a Ngrok como respaldo...");
-    }
-
-    // 3. Fallback final: Ngrok de contingencia
-    redirect(NGROK_HOST, "Ngrok (Respaldo)");
+ async function resolveRoute() {
+  if (isAdminMode) {
+    isCancelled = true;
+    spinner.style.display = "none";
+    adminBadge.style.display = "inline-block";
+    statusEl.textContent = "Redirección pausada para configuración.";
+    configBox.style.display = "block";
+    return;
   }
 
+  // 1. Obtener la URL más reciente de Cloudflare desde el config.json
+  try {
+    const res = await fetch(`config.json?_t=${Date.now()}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.cloudflare_host) {
+        localStorage.setItem("custom_cf_host", data.cloudflare_host);
+      }
+    }
+  } catch (e) {
+    console.warn("No se pudo obtener config.json, usando valor local/fallback");
+  }
+
+  // 2. Probar red Local
+  try {
+    statusEl.textContent = "Buscando servidor local...";
+    await probeEndpoint(LOCAL_HOST, 1200);
+    redirect(LOCAL_HOST, "Red Local (Oficina)");
+    return;
+  } catch (e) {
+    console.log("Local inaccesible, pasando a túnel externo...");
+  }
+
+  // 3. Probar Cloudflare Tunnel actualizado
+  const cfHost = getCloudflareHost();
+  try {
+    statusEl.textContent = "Conectando vía Cloudflare...";
+    await probeEndpoint(cfHost, 2200);
+    redirect(cfHost, "Cloudflare Tunnel");
+    return;
+  } catch (e) {
+    console.log("Cloudflare no respondió, recurriendo a Ngrok...");
+  }
+
+  // 4. Fallback a Ngrok
+  redirect(NGROK_HOST, "Ngrok (Respaldo)");
+}
   function toggleConfig() {
     isCancelled = true;
     spinner.style.display = "none";
