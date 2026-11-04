@@ -3,145 +3,148 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Acceso al Sistema</title>
+  <title>Conectando al Sistema...</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     body { background-color: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
-    .card { background: #1e293b; padding: 32px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); max-width: 480px; width: 100%; border: 1px solid #334155; }
-    h2 { font-size: 1.4rem; margin-bottom: 8px; color: #38bdf8; text-align: center; }
-    p.desc { font-size: 0.9rem; color: #94a3b8; margin-bottom: 24px; text-align: center; }
-    .status-box { background: #0f172a; border-radius: 8px; padding: 16px; margin-bottom: 24px; border: 1px solid #334155; font-size: 0.9rem; min-height: 70px; display: flex; flex-direction: column; justify-content: center; }
-    .status-text { color: #e2e8f0; font-weight: 500; }
-    .route-item { font-size: 0.8rem; color: #64748b; margin-top: 4px; word-break: break-all; }
-    .loader { border: 3px solid #334155; border-top: 3px solid #38bdf8; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; margin: 0 auto 12px; }
+    .card { background: #1e293b; padding: 32px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); max-width: 450px; width: 100%; border: 1px solid #334155; text-align: center; }
+    h2 { font-size: 1.25rem; color: #38bdf8; margin-bottom: 8px; }
+    .status-text { font-size: 0.9rem; color: #94a3b8; margin-bottom: 16px; min-height: 22px; }
+    .loader { border: 3px solid #334155; border-top: 3px solid #38bdf8; border-radius: 50%; width: 28px; height: 28px; animation: spin 0.8s linear infinite; margin: 0 auto 16px; }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-    .btn { display: block; width: 100%; padding: 12px; background: #0284c7; color: white; border: none; border-radius: 8px; font-size: 0.95rem; font-weight: 600; cursor: pointer; text-align: center; text-decoration: none; transition: background 0.2s; }
-    .btn:hover { background: #0369a1; }
-    .admin-link { margin-top: 20px; text-align: center; font-size: 0.8rem; }
-    .admin-link a { color: #64748b; text-decoration: none; cursor: pointer; }
-    .admin-link a:hover { color: #94a3b8; text-decoration: underline; }
-    .modal { display: none; margin-top: 20px; padding-top: 16px; border-top: 1px solid #334155; }
-    .modal input { width: 100%; padding: 10px; background: #0f172a; border: 1px solid #334155; color: white; border-radius: 6px; margin: 8px 0 12px; font-size: 0.85rem; }
-    .btn-secondary { background: #334155; padding: 8px 14px; font-size: 0.85rem; border-radius: 6px; border: none; color: white; cursor: pointer; }
-    .btn-secondary:hover { background: #475569; }
+    .btn-manual { display: none; margin-top: 15px; padding: 10px 16px; background: #0284c7; color: white; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 600; }
+    .config-trigger { margin-top: 24px; font-size: 0.75rem; color: #64748b; cursor: pointer; user-select: none; }
+    .config-trigger:hover { color: #94a3b8; text-decoration: underline; }
+    .config-box { display: none; margin-top: 14px; text-align: left; background: #0f172a; padding: 14px; border-radius: 8px; border: 1px solid #334155; }
+    .config-box input { width: 100%; padding: 8px 10px; background: #1e293b; border: 1px solid #475569; color: white; border-radius: 4px; font-size: 0.8rem; margin: 6px 0 10px; }
+    .config-box button { background: #38bdf8; color: #0f172a; border: none; padding: 7px 14px; border-radius: 4px; font-weight: 600; font-size: 0.8rem; cursor: pointer; }
+    .config-box button:hover { background: #7dd3fc; }
   </style>
 </head>
 <body>
 
 <div class="card">
-  <h2>Portal de Acceso</h2>
-  <p class="desc">Detectando la conexión más rápida disponible...</p>
-
   <div class="loader" id="spinner"></div>
+  <h2>Portal de Acceso</h2>
+  <div class="status-text" id="status">Detectando vía de conexión...</div>
+  
+  <a href="#" id="manual-btn" class="btn-manual">Entrar directamente</a>
 
-  <div class="status-box">
-    <div class="status-text" id="status-title">Comprobando red local...</div>
-    <div class="route-item" id="status-route">http://192.168.111.2/menu/</div>
-  </div>
-
-  <a href="#" id="direct-btn" class="btn" style="display: none;">Ingresar manualmente</a>
-
-  <div class="admin-link">
-    <a onclick="toggleAdmin()">⚙️ Cambiar enlace de Cloudflare</a>
-  </div>
-
-  <div class="modal" id="admin-panel">
-    <label style="font-size: 0.8rem; color: #94a3b8;">URL actual de Cloudflare Tunnel:</label>
-    <input type="text" id="cf-input" placeholder="https://xxxx.trycloudflare.com/menu/">
-    <button class="btn-secondary" onclick="saveCloudflare()">Guardar URL</button>
+  <div class="config-trigger" onclick="toggleConfig()">⚙️ Cambiar URL de Cloudflare</div>
+  <div class="config-box" id="config-box">
+    <label style="font-size: 0.75rem; color: #94a3b8;">Host base actual de Cloudflare:</label>
+    <input type="text" id="cf-input" placeholder="https://xxxx.trycloudflare.com">
+    <button onclick="saveCloudflare()">Guardar URL</button>
   </div>
 </div>
 
 <script>
-  const LOCAL_URL = "http://192.168.111.2/menu/";
-  const NGROK_URL = "https://indirectly-kind-crappie.ngrok-free.app/menu/";
-  const CF_DEFAULT = "https://tu-tunel-actual.trycloudflare.com/menu/";
+  // Hosts base
+  const LOCAL_HOST = "http://192.168.111.2";
+  const NGROK_HOST = "https://indirectly-kind-crappie.ngrok-free.app";
+  const CF_DEFAULT = "https://tu-tunel-actual.trycloudflare.com";
+  const TARGET_PATH = "/menu/";
 
-  const titleEl = document.getElementById("status-title");
-  const routeEl = document.getElementById("status-route");
+  const statusEl = document.getElementById("status");
+  const manualBtn = document.getElementById("manual-btn");
   const spinner = document.getElementById("spinner");
-  const directBtn = document.getElementById("direct-btn");
   const cfInput = document.getElementById("cf-input");
-  const adminPanel = document.getElementById("admin-panel");
 
-  function getStoredCF() {
-    return localStorage.getItem("custom_cf_url") || CF_DEFAULT;
+  function getCloudflareHost() {
+    let host = localStorage.getItem("custom_cf_host") || CF_DEFAULT;
+    return host.replace(/\/+$/, "");
   }
 
-  cfInput.value = getStoredCF();
+  cfInput.value = getCloudflareHost();
 
-  function testEndpoint(url, timeoutMs) {
+  // Sonda basada en imagen para evitar bloqueos por CORS y Mixed Content (HTTPS -> HTTP)
+  function probeEndpoint(baseHost, timeoutMs) {
     return new Promise((resolve, reject) => {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => {
-        controller.abort();
-        reject(new Error("Timeout"));
+      const img = new Image();
+      let finished = false;
+
+      const timer = setTimeout(() => {
+        if (!finished) {
+          finished = true;
+          img.src = "";
+          reject(new Error("Timeout"));
+        }
       }, timeoutMs);
 
-      // Usamos no-cors para detectar si el host responde sin ser bloqueados por CORS
-      fetch(url, { method: "HEAD", mode: "no-cors", signal: controller.signal })
-        .then(() => {
-          clearTimeout(timeoutId);
+      // Si carga exitosamente, el servidor local está activo
+      img.onload = () => {
+        if (!finished) {
+          finished = true;
+          clearTimeout(timer);
           resolve(true);
-        })
-        .catch(err => {
-          clearTimeout(timeoutId);
-          reject(err);
-        });
+        }
+      };
+
+      // Si da error de red pero el servidor respondió (ej: 404), hubo contacto con la IP
+      img.onerror = () => {
+        if (!finished) {
+          finished = true;
+          clearTimeout(timer);
+          // Nota: En caso de timeout de socket no llega aquí antes del timer
+          resolve(true);
+        }
+      };
+
+      // Petición al favicon con marca de tiempo para evitar caché del navegador
+      img.src = `${baseHost.replace(/\/+$/, "")}/favicon.ico?_t=${Date.now()}`;
     });
   }
 
-  function redirect(url, name) {
-    titleEl.textContent = `Conectando vía ${name}...`;
-    routeEl.textContent = url;
-    directBtn.href = url;
-    directBtn.style.display = "block";
+  function redirect(baseHost, label) {
+    const finalUrl = `${baseHost.replace(/\/+$/, "")}${TARGET_PATH}`;
+    statusEl.textContent = `Conectando por ${label}...`;
+    manualBtn.href = finalUrl;
+    manualBtn.style.display = "inline-block";
     spinner.style.display = "none";
+
     setTimeout(() => {
-      window.location.replace(url);
-    }, 500);
+      window.location.replace(finalUrl);
+    }, 350);
   }
 
   async function resolveRoute() {
-    // 1. Probar red Local (timeout agresivo de 1.5s)
+    // 1. Probar red Local (timeout de 1.2 segundos)
     try {
-      titleEl.textContent = "Probando conexión local...";
-      routeEl.textContent = LOCAL_URL;
-      await testEndpoint(LOCAL_URL, 1500);
-      redirect(LOCAL_URL, "Red Local (Oficina)");
+      statusEl.textContent = "Buscando servidor local...";
+      await probeEndpoint(LOCAL_HOST, 1200);
+      redirect(LOCAL_HOST, "Red Local (Oficina)");
       return;
     } catch (e) {
-      console.log("Local no disponible, probando Ngrok...");
+      console.log("Local no responde, intentando vía Ngrok...");
     }
 
-    // 2. Probar Ngrok (timeout de 2.5s)
+    // 2. Probar Ngrok (timeout de 2.0 segundos)
     try {
-      titleEl.textContent = "Probando enlace Ngrok...";
-      routeEl.textContent = NGROK_URL;
-      await testEndpoint(NGROK_URL, 2500);
-      redirect(NGROK_URL, "Ngrok");
+      statusEl.textContent = "Probando conexión externa (Ngrok)...";
+      await probeEndpoint(NGROK_HOST, 2000);
+      redirect(NGROK_HOST, "Ngrok");
       return;
     } catch (e) {
-      console.log("Ngrok no respondió o cuota agotada, pasando a Cloudflare...");
+      console.log("Ngrok no respondió o cuota agotada, saltando a Cloudflare...");
     }
 
-    // 3. Fallback directo a Cloudflare
-    const cfUrl = getStoredCF();
-    redirect(cfUrl, "Cloudflare Tunnel");
+    // 3. Fallback a Cloudflare
+    redirect(getCloudflareHost(), "Cloudflare Tunnel");
   }
 
-  function toggleAdmin() {
-    adminPanel.style.display = adminPanel.style.display === "block" ? "none" : "block";
+  function toggleConfig() {
+    const box = document.getElementById("config-box");
+    box.style.display = box.style.display === "block" ? "none" : "block";
   }
 
   function saveCloudflare() {
-    let val = cfInput.value.trim();
+    let val = cfInput.value.trim().replace(/\/+$/, "");
     if (val) {
       if (!val.startsWith("http://") && !val.startsWith("https://")) {
         val = "https://" + val;
       }
-      localStorage.setItem("custom_cf_url", val);
-      alert("Enlace guardado correctamente en este navegador.");
+      localStorage.setItem("custom_cf_host", val);
+      alert("Enlace de Cloudflare guardado correctamente.");
       location.reload();
     }
   }
