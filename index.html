@@ -83,42 +83,39 @@
 
   cfInput.value = getCloudflareHost();
 
-  // Sonda por imagen que elude Mixed Content (HTTPS -> HTTP)
-  function probeImage(base, timeoutMs, isLocalNetwork = false) {
-    return new Promise(resolve => {
+  // Sonda universal: usa Image para eludir Mixed Content en local, y fetch no-cors para túneles
+function probeEndpoint(base, timeoutMs, isLocal = false) {
+  return new Promise(resolve => {
+    let finished = false;
+    const finish = ok => {
+      if (!finished) {
+        finished = true;
+        clearTimeout(timer);
+        resolve(ok);
+      }
+    };
+
+    const timer = setTimeout(() => finish(false), timeoutMs);
+
+    if (isLocal) {
+      // Método Imagen para IP Local (evita bloqueo HTTPS -> HTTP)
       const img = new Image();
-      let finished = false;
-
-      const finish = ok => {
-        if (!finished) {
-          finished = true;
-          clearTimeout(timer);
-          img.onload = img.onerror = null;
-          resolve(ok);
-        }
-      };
-
-      const timer = setTimeout(() => {
-        img.src = "";
-        finish(false);
-      }, timeoutMs);
-
-      // Si carga la imagen, el servidor está disponible
       img.onload = () => finish(true);
-
-      img.onerror = () => {
-        // En red local, si el servidor responde con 404/500 lo hace en <200ms
-        // lo que confirma que el host 192.168.111.2 existe en la red actual
-        if (isLocalNetwork) {
-          finish(true);
-        } else {
-          finish(false);
-        }
-      };
-
+      img.onerror = () => finish(true); // Si responde en red local (incluso 404), el host existe
       img.src = `${base}${PROBE_PATH}?_t=${Date.now()}`;
-    });
-  }
+    } else {
+      // Método Fetch con no-cors para Cloudflare y Ngrok (ignora tipo de archivo y cabeceras)
+      fetch(`${base}${TARGET_PATH}`, { 
+        method: "HEAD", 
+        mode: "no-cors", 
+        cache: "no-store",
+        headers: { "ngrok-skip-browser-warning": "true" } // Salta la pantalla de Ngrok
+      })
+      .then(() => finish(true))
+      .catch(() => finish(false));
+    }
+  });
+}
 
   function redirect(base, label) {
     if (isCancelled) return;
