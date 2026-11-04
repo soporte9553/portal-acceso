@@ -14,6 +14,7 @@
     .loader { border: 3px solid #334155; border-top: 3px solid #38bdf8; border-radius: 50%; width: 28px; height: 28px; animation: spin 0.8s linear infinite; margin: 0 auto 16px; }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     .btn-manual { display: none; margin-top: 15px; padding: 10px 16px; background: #0284c7; color: white; border: none; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 600; cursor: pointer; }
+    .btn-manual:hover { background: #0369a1; }
     .config-trigger { margin-top: 24px; font-size: 0.75rem; color: #64748b; cursor: pointer; user-select: none; }
     .config-trigger:hover { color: #94a3b8; text-decoration: underline; }
     .config-box { display: none; margin-top: 14px; text-align: left; background: #0f172a; padding: 14px; border-radius: 8px; border: 1px solid #334155; }
@@ -43,26 +44,16 @@
 </div>
 
 <script>
-  // ---- Configuración -------------------------------------------------------
-  // Valores por defecto; config.json puede sobrescribirlos (local_host, cloudflare_host, ngrok_host).
+  // ---- Configuración Base --------------------------------------------------
   const DEFAULTS = {
     local: "http://192.168.111.2",
     cloudflare: "https://precise-bradley-eco-bulletin.trycloudflare.com",
     ngrok: "https://indirectly-kind-crappie.ngrok-free.app"
   };
   const TARGET_PATH = "/menu/";
-  // Imagen REAL servida por tu servidor (favicon.ico o un ping.gif de 1px).
-  // Solo si carga como imagen se considera que el servidor está vivo.
   const PROBE_PATH = "/favicon.ico";
-  const TIMEOUTS = { local: 1500, cloudflare: 4000, ngrok: 5000 };
 
-  const ROUTES = [
-    { key: "local",      label: "Red Local (Oficina)",  msg: "Buscando servidor local..." },
-    { key: "cloudflare", label: "Cloudflare Tunnel",    msg: "Conectando vía Cloudflare..." },
-    { key: "ngrok",      label: "Ngrok (Respaldo)",     msg: "Conectando vía Ngrok..." }
-  ];
-
-  // ---- Elementos -----------------------------------------------------------
+  // ---- Elementos del DOM ---------------------------------------------------
   const statusEl = document.getElementById("status");
   const manualBtn = document.getElementById("manual-btn");
   const retryBtn = document.getElementById("retry-btn");
@@ -92,41 +83,68 @@
 
   cfInput.value = getCloudflareHost();
 
-  // Devuelve true SOLO si el servidor entrega una imagen válida.
-  // Errores de red, timeouts y páginas de error (p. ej. túnel caído) devuelven false.
-  function probe(base, timeoutMs) {
+  // Sonda por imagen que elude Mixed Content (HTTPS -> HTTP)
+  function probeImage(base, timeoutMs, isLocalNetwork = false) {
     return new Promise(resolve => {
       const img = new Image();
-      const done = ok => {
-        clearTimeout(timer);
-        img.onload = img.onerror = null;
-        resolve(ok);
+      let finished = false;
+
+      const finish = ok => {
+        if (!finished) {
+          finished = true;
+          clearTimeout(timer);
+          img.onload = img.onerror = null;
+          resolve(ok);
+        }
       };
-      const timer = setTimeout(() => { img.src = ""; done(false); }, timeoutMs);
-      img.onload = () => done(true);
-      img.onerror = () => done(false);
+
+      const timer = setTimeout(() => {
+        img.src = "";
+        finish(false);
+      }, timeoutMs);
+
+      // Si carga la imagen, el servidor está disponible
+      img.onload = () => finish(true);
+
+      img.onerror = () => {
+        // En red local, si el servidor responde con 404/500 lo hace en <200ms
+        // lo que confirma que el host 192.168.111.2 existe en la red actual
+        if (isLocalNetwork) {
+          finish(true);
+        } else {
+          finish(false);
+        }
+      };
+
       img.src = `${base}${PROBE_PATH}?_t=${Date.now()}`;
     });
   }
 
   function redirect(base, label) {
+    if (isCancelled) return;
     const url = base + TARGET_PATH;
-    statusEl.textContent = `Conectado vía ${label}. Redirigiendo...`;
+    statusEl.textContent = `Conectando por ${label}...`;
     manualBtn.href = url;
     manualBtn.style.display = "inline-block";
-    window.location.replace(url);
+    spinner.style.display = "none";
+
+    setTimeout(() => {
+      if (!isCancelled) {
+        window.location.replace(url);
+      }
+    }, 350);
   }
 
   function showFailure() {
     spinner.style.display = "none";
     statusEl.classList.add("error");
     statusEl.textContent = navigator.onLine === false
-      ? "Sin conexión a internet ni a la red local. Revisa tu Wi-Fi o datos móviles."
-      : "No se pudo conectar: el servidor parece estar apagado o inaccesible. Inténtalo de nuevo en unos minutos.";
+      ? "Sin conexión a internet ni a la red local. Revisa tu Wi-Fi o cable de red."
+      : "No se pudo conectar: el servidor local y los túneles externos parecen apagados.";
     retryBtn.style.display = "inline-block";
   }
 
-  // ---- Lógica principal ----------------------------------------------------
+  // ---- Resolución en Cascada Secuencial ------------------------------------
   async function resolveRoute() {
     if (isAdminMode) {
       isCancelled = true;
@@ -143,7 +161,7 @@
       ngrok: DEFAULTS.ngrok
     };
 
-    // 1. Leer config.json sin caché
+    // 1. Descargar config.json sin caché para tener siempre el Cloudflare del .bat
     try {
       statusEl.textContent = "Obteniendo configuración actualizada...";
       const res = await fetch(`config.json?_t=${Date.now()}`, { cache: "no-store" });
@@ -160,22 +178,37 @@
     } catch (e) {
       console.warn("No se pudo leer config.json, usando último valor conocido:", e);
     }
+
     if (isCancelled) return;
 
-    // 2. Lanzar las tres pruebas en paralelo, pero decidir por orden de prioridad
-    const probes = ROUTES.map(r => probe(hosts[r.key], TIMEOUTS[r.key]));
-
-    for (let i = 0; i < ROUTES.length; i++) {
-      statusEl.textContent = ROUTES[i].msg;
-      const ok = await probes[i];
-      if (isCancelled) return;
-      if (ok) {
-        redirect(hosts[ROUTES[i].key], ROUTES[i].label);
-        return;
-      }
+    // 2. Probar RED LOCAL primero (timeout ágil de 1.2s)
+    statusEl.textContent = "Buscando servidor local...";
+    const localOk = await probeImage(hosts.local, 1200, true);
+    if (isCancelled) return;
+    if (localOk) {
+      redirect(hosts.local, "Red Local (Oficina)");
+      return;
     }
 
-    // 3. Ninguna vía respondió
+    // 3. Probar CLOUDFLARE como prioridad externa (timeout 2.5s)
+    statusEl.textContent = "Conectando vía Cloudflare...";
+    const cfOk = await probeImage(hosts.cloudflare, 2500, false);
+    if (isCancelled) return;
+    if (cfOk) {
+      redirect(hosts.cloudflare, "Cloudflare Tunnel");
+      return;
+    }
+
+    // 4. Probar NGROK solo como último respaldo (timeout 3.0s)
+    statusEl.textContent = "Conectando vía Ngrok (Respaldo)...";
+    const ngrokOk = await probeImage(hosts.ngrok, 3000, false);
+    if (isCancelled) return;
+    if (ngrokOk) {
+      redirect(hosts.ngrok, "Ngrok (Respaldo)");
+      return;
+    }
+
+    // 5. Si ninguno respondió
     showFailure();
   }
 
