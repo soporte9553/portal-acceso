@@ -1,9 +1,10 @@
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Conectando al Sistema...</title>
+  <title>Portal de Acceso</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     body { background-color: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
@@ -19,11 +20,13 @@
     .config-box input { width: 100%; padding: 8px 10px; background: #1e293b; border: 1px solid #475569; color: white; border-radius: 4px; font-size: 0.8rem; margin: 6px 0 10px; }
     .config-box button { background: #38bdf8; color: #0f172a; border: none; padding: 7px 14px; border-radius: 4px; font-weight: 600; font-size: 0.8rem; cursor: pointer; }
     .config-box button:hover { background: #7dd3fc; }
+    .badge-admin { display: none; background: #f59e0b; color: #000; font-size: 0.7rem; font-weight: bold; padding: 2px 8px; border-radius: 10px; margin-bottom: 10px; }
   </style>
 </head>
 <body>
 
 <div class="card">
+  <span class="badge-admin" id="admin-badge">MODO CONFIGURACIÓN ACTIVO</span>
   <div class="loader" id="spinner"></div>
   <h2>Portal de Acceso</h2>
   <div class="status-text" id="status">Detectando vía de conexión...</div>
@@ -39,7 +42,6 @@
 </div>
 
 <script>
-  // Hosts base
   const LOCAL_HOST = "http://192.168.111.2";
   const NGROK_HOST = "https://indirectly-kind-crappie.ngrok-free.app";
   const CF_DEFAULT = "https://tu-tunel-actual.trycloudflare.com";
@@ -49,6 +51,15 @@
   const manualBtn = document.getElementById("manual-btn");
   const spinner = document.getElementById("spinner");
   const cfInput = document.getElementById("cf-input");
+  const configBox = document.getElementById("config-box");
+  const adminBadge = document.getElementById("admin-badge");
+
+  // Variable de control para pausar o detener redirecciones
+  let isCancelled = false;
+
+  // Detecta si se ingresó con ?admin=true o #admin
+  const urlParams = new URLSearchParams(window.location.search);
+  const isAdminMode = urlParams.get("admin") === "true" || window.location.hash === "#admin";
 
   function getCloudflareHost() {
     let host = localStorage.getItem("custom_cf_host") || CF_DEFAULT;
@@ -57,7 +68,6 @@
 
   cfInput.value = getCloudflareHost();
 
-  // Sonda basada en imagen para evitar bloqueos por CORS y Mixed Content (HTTPS -> HTTP)
   function probeEndpoint(baseHost, timeoutMs) {
     return new Promise((resolve, reject) => {
       const img = new Image();
@@ -71,7 +81,6 @@
         }
       }, timeoutMs);
 
-      // Si carga exitosamente, el servidor local está activo
       img.onload = () => {
         if (!finished) {
           finished = true;
@@ -80,22 +89,21 @@
         }
       };
 
-      // Si da error de red pero el servidor respondió (ej: 404), hubo contacto con la IP
       img.onerror = () => {
         if (!finished) {
           finished = true;
           clearTimeout(timer);
-          // Nota: En caso de timeout de socket no llega aquí antes del timer
           resolve(true);
         }
       };
 
-      // Petición al favicon con marca de tiempo para evitar caché del navegador
       img.src = `${baseHost.replace(/\/+$/, "")}/favicon.ico?_t=${Date.now()}`;
     });
   }
 
   function redirect(baseHost, label) {
+    if (isCancelled) return;
+
     const finalUrl = `${baseHost.replace(/\/+$/, "")}${TARGET_PATH}`;
     statusEl.textContent = `Conectando por ${label}...`;
     manualBtn.href = finalUrl;
@@ -103,38 +111,46 @@
     spinner.style.display = "none";
 
     setTimeout(() => {
-      window.location.replace(finalUrl);
-    }, 350);
+      if (!isCancelled) {
+        window.location.replace(finalUrl);
+      }
+    }, 400);
   }
 
   async function resolveRoute() {
-    // 1. Probar red Local (timeout de 1.2 segundos)
+    // Si entraste en modo admin, no se ejecuta ninguna redirección
+    if (isAdminMode) {
+      isCancelled = true;
+      spinner.style.display = "none";
+      adminBadge.style.display = "inline-block";
+      statusEl.textContent = "Redirección pausada para configuración.";
+      configBox.style.display = "block";
+      return;
+    }
+
     try {
       statusEl.textContent = "Buscando servidor local...";
       await probeEndpoint(LOCAL_HOST, 1200);
       redirect(LOCAL_HOST, "Red Local (Oficina)");
       return;
-    } catch (e) {
-      console.log("Local no responde, intentando vía Ngrok...");
-    }
+    } catch (e) {}
 
-    // 2. Probar Ngrok (timeout de 2.0 segundos)
     try {
       statusEl.textContent = "Probando conexión externa (Ngrok)...";
       await probeEndpoint(NGROK_HOST, 2000);
       redirect(NGROK_HOST, "Ngrok");
       return;
-    } catch (e) {
-      console.log("Ngrok no respondió o cuota agotada, saltando a Cloudflare...");
-    }
+    } catch (e) {}
 
-    // 3. Fallback a Cloudflare
     redirect(getCloudflareHost(), "Cloudflare Tunnel");
   }
 
+  // Al hacer clic en la tuerca se cancela inmediatamente cualquier redirección pendiente
   function toggleConfig() {
-    const box = document.getElementById("config-box");
-    box.style.display = box.style.display === "block" ? "none" : "block";
+    isCancelled = true;
+    spinner.style.display = "none";
+    statusEl.textContent = "Redirección cancelada. Ajusta tu configuración:";
+    configBox.style.display = configBox.style.display === "block" ? "none" : "block";
   }
 
   function saveCloudflare() {
@@ -145,7 +161,8 @@
       }
       localStorage.setItem("custom_cf_host", val);
       alert("Enlace de Cloudflare guardado correctamente.");
-      location.reload();
+      // Limpia el parámetro admin para reanudar el flujo normal
+      window.location.href = window.location.pathname;
     }
   }
 
